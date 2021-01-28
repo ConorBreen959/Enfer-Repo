@@ -1,0 +1,134 @@
+---
+title: "Script for Generating Numbers Report for Selected Day"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+## Initial Setup chunk. This chunk sets some general global settings and installs and attaches the required packages
+
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_knit$set(root.dir = 'A:/BioRad CFX Processing/BioRad Generated Files/Reports')
+
+# List of required packages
+packages <- c("data.table", "tidyverse", "kableExtra")
+
+# Check if packages are installed; install if not
+new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+# Attach required packages
+library(data.table)
+library(tidyverse)
+library(kableExtra)
+```
+
+# Introduction
+
+This script generates a numbers report based on the text files in a selected Reported to NVRL folder. It relies on the files in that folder being the correct results reported that day; if any other files reported on different days are present, these will be included in the report as well.
+
+### Step 1
+
+RStudio must be installed on your local computer. Speak to Dan or Conor about getting this set up.
+
+### Step 2
+
+Open up this file in RStudio, named Numbers.Rmd. The folder path is given below.
+
+```{r, eval = FALSE, echo = TRUE, include = TRUE}
+COVID 19 (A:)\DA\Conor\Scripts
+```
+
+### Step 3
+
+Click 'Run' and 'Run All' in the taskbar above to the right.
+
+```{r, include = FALSE}
+## This chunk contains the function for generating the numbers report
+
+numbers <- function(path){
+
+# Set the folder path given as input
+suppressWarnings(setwd(path))
+  
+# Read the exported text files in the folder into a single dataframe with sep and NA preferences set
+data <- as.data.frame(rbindlist(lapply(list.files(path = ".", pattern = ".txt"), fread, sep="\t", na.strings="NaN")))
+
+# Rename column names to remove whitespaces
+colnames(data) <- c("Sample", "Position", "Channel", "Cp", "Call")
+
+
+# Interpret result for each sample; algorithm parameters are set in the ifelse statement
+data <- data %>% 
+  
+  # Remove duplicate samples
+  distinct(Sample, Channel, .keep_all = T) %>%
+  
+  # Change dataframe from long to wide format so that each sample is on one row
+  spread(Channel, Cp) %>%
+  
+  # Interpret result
+  mutate(Call = ifelse(is.na(FAM) & is.na(CY5) & is.na(HEX), "Invalid", 
+                ifelse(is.na(FAM) & is.na(CY5) & HEX > 0, "Negative", 
+                ifelse(is.na(FAM) & CY5 >= 30 | FAM >= 30 & is.na(CY5), "Presumptive",
+                ifelse(FAM < 30 & CY5 < 30 | FAM < 30 & is.na(CY5) | is.na(FAM) & CY5 < 30 | FAM < 30 & CY5 > 30 | FAM > 30 & CY5 < 30, "Positive", 
+                ifelse(FAM > 30 & CY5 > 30, "Presumptive", NA))))))
+
+
+# Count the numbers for each result
+
+# Total samples
+a <- length(unique(data$Sample))
+
+# Total positive or presumptive
+b <- sum(sum(data$Call == "Positive"), sum(data$Call == "Presumptive"))
+
+# Total negative
+c <- sum(data$Call == "Negative")
+
+# Total invalid
+d <- sum(data$Call == "Invalid")
+
+# Percentage positive
+e <- (sum(sum(data$Call == "Positive"), sum(data$Call == "Presumptive")) * 100 / sum(sum(sum(data$Call == "Positive"), sum(data$Call == "Presumptive")),sum(data$Call == "Negative"),sum(data$Call == "Invalid")))
+
+
+# Create table
+table <- data.frame(a, b, c, d, e)
+
+# Set table column names
+colnames(table) <- c("Total Samples", "Total Positive", "Negative", "Invalid", "Percentage Positive")
+
+# Format table using kableExtra
+kable(table, format = "html", row.names = FALSE) %>%
+  kable_styling(full_width = F, position = "left")
+
+}
+```
+
+### Step 4
+
+This step generates the report. The function is in the form `numbers('path')`, where 'path' is the location of the folder you want to analyse. 
+
+Type in the folder and click the 'run' button.
+
+An example is given below.
+
+```{r, warning = FALSE, echo = TRUE, include = TRUE}
+numbers("01 January/23012021/For NVRL export")
+```
+
+
+#### Important Usage Note
+
+For the sake of convenience, it is not necessary to type the entire folder path; just the path from "01 January" onwards.
+
+Also, Windows separates folder names with a "\", while RStudio uses a "/" or else it won't work. Please ensure the right character is used. 
+
+
+#### Troubleshooting
+
+Speak to Conor or Dan with any issues.
+
