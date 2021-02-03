@@ -1,9 +1,9 @@
 ---
 title: "Script for Generating Numbers Report for Selected Day"
 output:
+  pdf_document: default
   html_document:
     df_print: paged
-  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -27,7 +27,7 @@ library(kableExtra)
 
 # Introduction
 
-This script generates a numbers report based on the text files in a selected Reported to NVRL folder. It relies on the files in that folder being the correct results reported that day; if any other files reported on different days are present, these will be included in the report as well.
+This script generates a numbers report based on the text files in a selected Reported to NVRL folder. It relies on the files in that folder being the correct results reported that day; if any other files reported on different days are present, for example re-uploaded samples, these will be included in the report as well. The script is designed to handle text files with results from all three assays; Altona, Euroimmun, and Idexx.
 
 ### Step 1
 
@@ -37,7 +37,7 @@ RStudio must be installed on your local computer. Speak to Dan or Conor about ge
 
 Open up this file in RStudio, named Numbers.Rmd. The folder path is given below.
 
-```{r, eval = FALSE, echo = TRUE, include = TRUE}
+```{r, error = FALSE, eval = FALSE, echo = TRUE, include = TRUE}
 COVID 19 (A:)\DA\Conor\Scripts
 ```
 
@@ -46,86 +46,407 @@ COVID 19 (A:)\DA\Conor\Scripts
 Click 'Run' and 'Run All' in the taskbar above to the right.
 
 ```{r, include = FALSE}
-## This chunk contains the function for generating the numbers report
+## This chunk contains the functions for generating the numbers report
+
+## Usage!
+
+# There are three basic functions to count the positives depending on the assay.
+# Each function reads in .txt files from the specified folder that contain the name of the assay, e.g. _Altona.txt. 
+# Each of the three functions are largely the same except for the interpretation conditions;
+# i.e. Altona results are interpreted based on FAM and Cy5, while Euroimmun is interpreted based on FAM alone. There may also be different Cp thresholds. 
+# The fourth and final function, named 'numbers', calls each of the three functions to count numbers and combines the results into one table.
+
+  
+## Call the Altona function  
+
+altona_numbers <- function(){
+  
+  # Read in all .txt files in the folder that contain "Altona"
+  altona_files <- list.files(path = ".", pattern = "Altona.txt")
+
+  # Check if any Altona .txt files were read in; perform the function on any that were
+  if(length(altona_files) != 0){
+      
+    # Read the exported text files in the folder into a single dataframe with sep and NA preferences set
+    data <- as.data.frame(rbindlist(lapply(altona_files, fread, sep="\t", na.strings="NaN")))
+  
+    # Rename column names to remove whitespaces
+    colnames(data) <- c("Sample", "Position", "Channel", "Cp", "Call")
+  
+  
+    # Interpret result for each sample; algorithm parameters are set in the ifelse statement
+    data <- data %>%
+  
+    # Remove duplicate samples
+    distinct(Sample, Channel, .keep_all = T) %>%
+  
+    # Change dataframe from long to wide format so that each sample is on one row
+    spread(Channel, Cp) %>%
+  
+    # Interpret result using dplyr::mutate and ifelse conditions; invalid, positive, or negative
+    mutate(Call = ifelse(is.na(FAM) & is.na(CY5) & is.na(HEX), "Invalid", 
+                    ifelse(is.na(FAM) & is.na(CY5) & HEX > 0, "Negative", 
+                    ifelse(FAM > 0 | CY5 > 0, "Positive", NA))))
+    
+    
+    # Open a new column that will be used to designate samples based on Cp range - 15-20, 30-35, etc.
+    data[, "Cp_Call"] <- NA
+    
+    
+    # Designate samples based on Cp range using dplyr::mutate and ifelse conditions
+    data <- data %>%
+      
+      mutate(Cp_Call = ifelse(is.na(FAM) & CY5 > 35 | FAM > 35, "35-40",
+                       ifelse(is.na(FAM) & CY5 > 30 | FAM > 30, "30-35", 
+                       ifelse(is.na(FAM) & CY5 > 25 | FAM > 25, "25-30",
+                       ifelse(is.na(FAM) & CY5 > 20 | FAM > 20, "20-25",
+                       ifelse(is.na(FAM) & CY5 > 15 | FAM > 15, "15-20",
+                       ifelse(is.na(FAM) & CY5 > 10 | FAM > 10, "10-15",
+                       ifelse(is.na(FAM) & CY5 > 5 | FAM > 5, "5-10",
+                       ifelse(is.na(FAM) & CY5 > 0 | FAM > 0, "0-5", NA)))))))))
+    
+    
+    ## Count the numbers for each result
+    
+    # Total samples
+    tot_samples <- length(unique(data$Sample))
+    
+    # Total Cp 0 to 5
+    cp_5 <- sum(data$Cp_Call == "0-5", na.rm = T)
+    
+    # Total Cp 5 to 10
+    cp_10 <- sum(data$Cp_Call == "5-10", na.rm = T)
+    
+    # Total Cp 10 to 15
+    cp_15 <- sum(data$Cp_Call == "10-15", na.rm = T)
+    
+    # Total Cp 15 to 20
+    cp_20 <- sum(data$Cp_Call == "15-20", na.rm = T)
+    
+    # Total Cp 20 to 25
+    cp_25 <- sum(data$Cp_Call == "20-25", na.rm = T)
+    
+    # Total Cp 25 to 30
+    cp_30 <- sum(data$Cp_Call == "25-30", na.rm = T)
+    
+    # Total Cp 30 to 35
+    cp_35 <- sum(data$Cp_Call == "30-35", na.rm = T)
+    
+    # Total Cp 35 to 40
+    cp_40 <- sum(data$Cp_Call == "35-40", na.rm = T)
+    
+    # Total positives
+    tot_pos <- sum(data$Call == "Positive")
+    
+    # Total negative
+    tot_neg <- sum(data$Call == "Negative")
+    
+    # Total invalid
+    tot_inv <- sum(data$Call == "Invalid")
+  
+    # Percentage positive
+    pc_pos <- round((tot_pos * 100 / tot_samples), 2)
+    
+    # Create table with Cp counts as percentages of total positives
+    altona_table <- data.frame(tot_samples, tot_pos, tot_inv, pc_pos, cp_5, cp_10, cp_15, cp_20, cp_25, cp_30, cp_35, cp_40)
+  
+  
+    # Set table column names
+    colnames(altona_table) <- c("Samples", "Positives", "Invalids", "% Positive", "% 0-5", "% 5-10", "% 10-15", "% 15-20", "% 20-25", "% 25-30", "% 30-35", "% 35-40")
+  
+    # Handle missing values that result from getting percentage of 0 positives
+    altona_table[altona_table == "NaN"] <- 0.00
+    
+    return(altona_table)
+  }
+}
+
+
+## Call the Euroimmun function  
+
+euroimmun_numbers <- function(){
+  
+  # Read in all .txt files in the folder that contain "Euroimmun"
+  euroimmun_files <- list.files(path = ".", pattern = "Euroimmun.txt")
+
+  # Check if any Euroimmun .txt files were read in; perform the function on any that were
+  if(length(euroimmun_files) != 0){
+      
+    # Read the exported text files in the folder into a single dataframe with sep and NA preferences set
+    data <- as.data.frame(rbindlist(lapply(euroimmun_files, fread, sep="\t", na.strings="NaN")))
+  
+    # Rename column names to remove whitespaces
+    colnames(data) <- c("Sample", "Position", "Channel", "Cp", "Call")
+  
+  
+    # Interpret result for each sample; algorithm parameters are set in the ifelse statement
+    data <- data %>%
+  
+    # Remove duplicate samples
+    distinct(Sample, Channel, .keep_all = T) %>%
+  
+    # Change dataframe from long to wide format so that each sample is on one row
+    spread(Channel, Cp) %>%
+  
+    # Interpret result using dplyr::mutate and ifelse conditions
+     mutate(Call = ifelse(is.na(FAM) & is.na(HEX), "Invalid", 
+                    ifelse(is.na(FAM) & HEX > 0, "Negative", 
+                    ifelse(FAM > 0, "Positive", NA))))
+    
+    data[, "Cp_Call"] <- NA
+    
+    data <- data %>%
+      
+      mutate(Cp_Call = ifelse(FAM > 35, "35-40",
+                       ifelse(FAM > 30, "30-35", 
+                       ifelse(FAM > 25, "25-30",
+                       ifelse(FAM > 20, "20-25",
+                       ifelse(FAM > 15, "15-20",
+                       ifelse(FAM > 10, "10-15",
+                       ifelse(FAM > 5, "5-10",
+                       ifelse(FAM > 0, "0-5", NA)))))))))
+    
+    ## Count the numbers for each result
+    
+    # Total samples
+    tot_samples <- length(unique(data$Sample))
+    
+    # Total Cp 0 to 5
+    cp_5 <- sum(data$Cp_Call == "0-5", na.rm = T)
+    
+    # Total Cp 5 to 10
+    cp_10 <- sum(data$Cp_Call == "5-10", na.rm = T)
+    
+    # Total Cp 10 to 15
+    cp_15 <- sum(data$Cp_Call == "10-15", na.rm = T)
+    
+    # Total Cp 15 to 20
+    cp_20 <- sum(data$Cp_Call == "15-20", na.rm = T)
+    
+    # Total Cp 20 to 25
+    cp_25 <- sum(data$Cp_Call == "20-25", na.rm = T)
+    
+    # Total Cp 25 to 30
+    cp_30 <- sum(data$Cp_Call == "25-30", na.rm = T)
+    
+    # Total Cp 30 to 35
+    cp_35 <- sum(data$Cp_Call == "30-35", na.rm = T)
+    
+    # Total Cp 35 to 40
+    cp_40 <- sum(data$Cp_Call == "35-40", na.rm = T)
+    
+    # Total positives
+    tot_pos <- sum(data$Call == "Positive")
+    
+    # Total negative
+    tot_neg <- sum(data$Call == "Negative")
+    
+    # Total invalid
+    tot_inv <- sum(data$Call == "Invalid")
+  
+    # Percentage positive
+    pc_pos <- round((tot_pos * 100 / tot_samples), 2)
+    
+    # Create table with Cp counts as percentages of total positives
+    euroimmun_table <- data.frame(tot_samples, tot_pos, tot_inv, pc_pos, cp_5, cp_10, cp_15, cp_20, cp_25, cp_30, cp_35, cp_40)
+  
+  
+    # Set table column names
+    colnames(euroimmun_table) <- c("Samples", "Positives", "Invalids", "% Positive", "% 0-5", "% 5-10", "% 10-15", "% 15-20", "% 20-25", "% 25-30", "% 30-35", "% 35-40")
+  
+    # Handle missing values that result from getting percentage of 0 positives
+    euroimmun_table[euroimmun_table == "NaN"] <- 0.00
+    
+    return(euroimmun_table)
+  }
+}
+
+
+## Call the Idexx function  
+
+idexx_numbers <- function(){
+  
+  # Read in all .txt files in the folder that contain "Idexx"
+  idexx_files <- list.files(path = ".", pattern = "Idexx.txt")
+
+  
+  # Check if any Idexx .txt files were read in; perform the function on any that were
+  if(length(idexx_files) != 0){
+      
+    # Read the exported text files in the folder into a single dataframe with sep and NA preferences set
+    data <- as.data.frame(rbindlist(lapply(idexx_files, fread, sep="\t", na.strings="NaN")))
+  
+    # Rename column names to remove whitespaces
+    colnames(data) <- c("Sample", "Position", "Channel", "Cp", "Call")
+  
+  
+    # Interpret result for each sample; algorithm parameters are set in the ifelse statement
+    data <- data %>%
+  
+    # Remove duplicate samples
+    distinct(Sample, Channel, .keep_all = T) %>%
+  
+    # Change dataframe from long to wide format so that each sample is on one row
+    spread(Channel, Cp) %>%
+  
+    # Interpret result using dplyr::mutate and ifelse conditions
+    mutate(Call = ifelse(is.na(FAM) & is.na(HEX), "Invalid", 
+                    ifelse(is.na(FAM) & HEX > 0, "Negative", 
+                    ifelse(FAM > 0, "Positive", NA))))
+    
+    data[, "Cp_Call"] <- NA
+    
+    data <- data %>%
+      
+      mutate(Cp_Call = ifelse(FAM > 35, "35-40",
+                       ifelse(FAM > 30, "30-35", 
+                       ifelse(FAM > 25, "25-30",
+                       ifelse(FAM > 20, "20-25",
+                       ifelse(FAM > 15, "15-20",
+                       ifelse(FAM > 10, "10-15",
+                       ifelse(FAM > 5, "5-10",
+                       ifelse(FAM > 0, "0-5", NA)))))))))
+    
+    ## Count the numbers for each result
+    
+    # Total samples
+    tot_samples <- length(unique(data$Sample))
+    
+    # Total Cp 0 to 5
+    cp_5 <- sum(data$Cp_Call == "0-5", na.rm = T)
+    
+    # Total Cp 5 to 10
+    cp_10 <- sum(data$Cp_Call == "5-10", na.rm = T)
+    
+    # Total Cp 10 to 15
+    cp_15 <- sum(data$Cp_Call == "10-15", na.rm = T)
+    
+    # Total Cp 15 to 20
+    cp_20 <- sum(data$Cp_Call == "15-20", na.rm = T)
+    
+    # Total Cp 20 to 25
+    cp_25 <- sum(data$Cp_Call == "20-25", na.rm = T)
+    
+    # Total Cp 25 to 30
+    cp_30 <- sum(data$Cp_Call == "25-30", na.rm = T)
+    
+    # Total Cp 30 to 35
+    cp_35 <- sum(data$Cp_Call == "30-35", na.rm = T)
+    
+    # Total Cp 35 to 40
+    cp_40 <- sum(data$Cp_Call == "35-40", na.rm = T)
+    
+    # Total positives
+    tot_pos <- sum(data$Call == "Positive")
+    
+    # Total negative
+    tot_neg <- sum(data$Call == "Negative")
+    
+    # Total invalid
+    tot_inv <- sum(data$Call == "Invalid")
+  
+    # Percentage positive
+    pc_pos <- round((tot_pos * 100 / tot_samples), 2)
+    
+    # Create table with Cp counts as percentages of total positives
+    idexx_table <- data.frame(tot_samples, tot_pos, tot_inv, pc_pos, cp_5, cp_10, cp_15, cp_20, cp_25, cp_30, cp_35, cp_40)
+  
+  
+    # Set table column names
+    colnames(idexx_table) <- c("Samples", "Positives", "Invalids", "% Positive", "% 0-5", "% 5-10", "% 10-15", "% 15-20", "% 20-25", "% 25-30", "% 30-35", "% 35-40")
+    
+    # Handle missing values that result from getting percentage of 0 positives
+    idexx_table[idexx_table == "NaN"] <- 0.00
+    
+    return(idexx_table)
+  }
+}
+
+
+## Call the final numbers function to calculate sample numbers and generate the final report table
 
 numbers <- function(path){
-
-# Set the folder path given as input
-suppressWarnings(setwd(path))
   
-# Read the exported text files in the folder into a single dataframe with sep and NA preferences set
-data <- as.data.frame(rbindlist(lapply(list.files(path = ".", pattern = ".txt"), fread, sep="\t", na.strings="NaN")))
+  # Set the specified path
+  suppressWarnings(setwd(path))
 
-# Rename column names to remove whitespaces
-colnames(data) <- c("Sample", "Position", "Channel", "Cp", "Call")
-
-
-# Interpret result for each sample; algorithm parameters are set in the ifelse statement
-data <- data %>% 
+  # Run the three numbers functions for each of the three assays; combine the three results into one dataframe
+  tot <- rbind(altona_numbers(), euroimmun_numbers(), idexx_numbers())
   
-  # Remove duplicate samples
-  distinct(Sample, Channel, .keep_all = T) %>%
+  # Count the total samples, total positives, total invalids, and the percentage positives
+  tot_samples <- sum(tot$Samples)
+  tot_pos <- sum(tot$Positives)
+  tot_inv <- sum(tot$Invalids)
+  tot_pc_pos <- round((tot_pos * 100 / tot_samples), 2)
   
-  # Change dataframe from long to wide format so that each sample is on one row
-  spread(Channel, Cp) %>%
+  # Total positives with Cp 0 to 5
+  cp_5 <- sum(tot$`% 0-5`)
+  pc_cp_5 <- round((cp_5 * 100 / tot_pos), 2)
   
-  # Interpret result
-  mutate(Call = ifelse(is.na(FAM) & is.na(CY5) & is.na(HEX), "Invalid", 
-                ifelse(is.na(FAM) & is.na(CY5) & HEX > 0, "Negative", 
-                ifelse(is.na(FAM) & CY5 >= 30 | FAM >= 30 & is.na(CY5), "Presumptive",
-                ifelse(FAM < 30 & CY5 < 30 | FAM < 30 & is.na(CY5) | is.na(FAM) & CY5 < 30 | FAM < 30 & CY5 > 30 | FAM > 30 & CY5 < 30, "Positive", 
-                ifelse(FAM > 30 & CY5 > 30, "Presumptive", NA))))))
-
-
-# Count the numbers for each result
-
-# Total samples
-a <- length(unique(data$Sample))
-
-# Total positive or presumptive
-b <- sum(sum(data$Call == "Positive"), sum(data$Call == "Presumptive"))
-
-# Total negative
-c <- sum(data$Call == "Negative")
-
-# Total invalid
-d <- sum(data$Call == "Invalid")
-
-# Percentage positive
-e <- (sum(sum(data$Call == "Positive"), sum(data$Call == "Presumptive")) * 100 / sum(sum(sum(data$Call == "Positive"), sum(data$Call == "Presumptive")),sum(data$Call == "Negative"),sum(data$Call == "Invalid")))
-
-
-# Create table
-table <- data.frame(a, b, c, d, e)
-
-# Set table column names
-colnames(table) <- c("Total Samples", "Total Positive", "Negative", "Invalid", "Percentage Positive")
-
-# Format table using kableExtra
-kable(table, format = "html", row.names = FALSE) %>%
-  kable_styling(full_width = F, position = "left")
-
+  # Total positives with Cp 5 to 10
+  cp_10 <- sum(tot$`% 5-10`)
+  pc_cp_10 <- round((cp_10 * 100 / tot_pos), 2)
+  
+  # Total positives with Cp 10 to 15
+  cp_15 <- sum(tot$`% 10-15`)
+  pc_cp_15 <- round((cp_15 * 100 / tot_pos), 2)
+  
+  # Total positives with Cp 15 to 20
+  cp_20 <- sum(tot$`% 15-20`)
+  pc_cp_20 <- round((cp_20 * 100 / tot_pos), 2)
+  
+  # Total positives with Cp 20 to 25
+  cp_25 <- sum(tot$`% 20-25`)
+  pc_cp_25 <- round((cp_25 * 100 / tot_pos), 2)
+  
+  # Total positives with Cp 25 to 30
+  cp_30 <- sum(tot$`% 25-30`)
+  pc_cp_30 <- round((cp_30 * 100 / tot_pos), 2)
+  
+  # Total positives with Cp 30 to 35
+  cp_35 <- sum(tot$`% 30-35`)
+  pc_cp_35 <- round((cp_35 * 100 / tot_pos), 2)
+  
+  # Total positives with Cp 35 to 40
+  cp_40 <- sum(tot$`% 35-40`)
+  pc_cp_40 <- round((cp_40 * 100 / tot_pos), 2)
+  
+  
+  # Combine all counts into one dataframe to generate the final numbers report
+  final_table <- data.frame(tot_samples, tot_pos, tot_inv, tot_pc_pos, pc_cp_5, pc_cp_10, pc_cp_15, pc_cp_20, pc_cp_25, pc_cp_30, pc_cp_35, pc_cp_40)
+  
+  # Set column names
+  colnames(final_table) <- c("Samples", "Pos", "Inv", "% Pos", "% 0-5", "% 5-10", "% 10-15", "% 15-20", "% 20-25", "% 25-30", "% 30-35", "% 35-40")
+      
+  # Handle missing values that result from getting percentage of 0 positives
+  final_table[final_table == "NaN"] <- 0.00
+  
+  # Print nicely formatted table using kableExtra
+  kable(final_table, row.names = FALSE) %>%
+    kable_styling(full_width = F, position = "center")
 }
 ```
+
 
 ### Step 4
 
 This step generates the report. The function is in the form `numbers('path')`, where 'path' is the location of the folder you want to analyse. 
 
-Type in the folder and click the 'run' button.
+Type in the folder and click the green arrow button to the right.
 
 An example is given below.
 
 ```{r, warning = FALSE, echo = TRUE, include = TRUE}
-numbers("01 January/23012021/For NVRL export")
+numbers("02 February/02022021/For NVRL Export")
 ```
+
 
 
 #### Important Usage Note
 
 For the sake of convenience, it is not necessary to type the entire folder path; just the path from "01 January" onwards.
 
-Also, Windows separates folder names with a "\", while RStudio uses a "/" or else it won't work. Please ensure the right character is used. 
+Also, Windows separates folder names with a `\`, while RStudio uses a `/` or else it won't work. Please ensure the right character is used. 
 
 
 #### Troubleshooting
